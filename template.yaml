@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  rust-lambda-inference
+
+  Demonstrate  how to use onnxruntime to build a rust lambda function for image inference.
+
+Globals:
+  Function:
+    Timeout: 20
+    MemorySize: 8846
+  Api:
+    BinaryMediaTypes:
+      - image/jpeg
+
+Resources:
+  InferenceFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: rust-cargolambda
+    Properties:
+      CodeUri: .
+      Handler: bootstrap
+      Runtime: provided.al2023
+      Environment:
+        Variables:
+          HOME: "/tmp"
+          RUST_LOG: "debug"
+          MODEL_PATH: "/opt/model/yolov10m.onnx"
+          ORT_DYLIB_PATH: "/opt/lib/x86/libonnxruntime.so.1.18.1"
+      Architectures:
+        - x86_64
+        #- arm64
+      Layers:
+        - !Ref ModelLibLayer
+      Events:
+        Inference:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessRestApi
+            Path: /inference
+            Method: post
+
+  ServerlessRestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      MethodSettings:
+        - HttpMethod: "*"
+          ResourcePath: "/*"
+          LoggingLevel: INFO
+          ThrottlingRateLimit: 1
+          ThrottlingBurstLimit: 2
+
+  ModelLibLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: ModelLibLayer
+      Description: Custom layer containing model and libraries
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - provided.al2023
+
+  PowerTuningApp:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: arn:aws:serverlessrepo:us-east-1:451282441545:applications/aws-lambda-power-tuning
+        SemanticVersion: 4.3.4
+
+        Parameters:
+            lambdaResource: '*' # IAM permission (ARN or prefix):q
+
+Outputs:
+  InferenceApi:
+    Description: "API Gateway endpoint URL for prod stage for inference function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/inference/"
+  InferenceFunction:
+    Description: "InferenceFunction Lambda Function ARN"
+    Value: !GetAtt InferenceFunction.Arn
+  InferenceFunctionIamRole:
+    Description: "Implicit IAM Role created for InferenceFunction"
+    Value: !GetAtt InferenceFunctionRole.Arn
+  PowerTuningApp:
+    Description: "PowerTuningApp ARN"
+    Value: !GetAtt PowerTuningApp.Outputs.StateMachineARN
